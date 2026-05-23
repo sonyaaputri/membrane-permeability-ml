@@ -1,0 +1,13 @@
+metric,value
+dataset_name,PAMPA_NCATS
+n_rows,2034
+n_columns,3
+n_unique_smiles,2034
+n_duplicate_smiles,0
+missing_drug_id,0
+missing_smiles,0
+missing_target,0
+class_0_count_low_moderate,295
+class_1_count_high,1739
+class_0_percentage,14.5
+class_1_percentage,85.5
