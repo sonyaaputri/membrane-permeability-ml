@@ -4,6 +4,7 @@ __pycache__/
 .env
 .venv/
 venv/
+.venv-1/
 .DS_Store
 
 # Optional: ignore temporary files
