@@ -20,6 +20,7 @@ membrane-permeability-ml/
 ├── models/
 ├── results/
 └── report/
+```text
 
 ## Alur Program
 Load Dataset
