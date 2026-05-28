@@ -6,13 +6,17 @@ Tahap interpretasi model dan prediksi pada molekul baru:
 2. Load data fitur untuk analisis
 3. Menghitung feature importance
 4. Membuat visualisasi feature importance
-5. Membuat fungsi prediksi untuk SMILES baru
-6. Menghitung fitur dan melakukan prediksi
-7. Menyimpan hasil demo prediksi
+5. Evaluasi model pada test set dengan confusion matrix dan ROC curve
+6. Membuat fungsi prediksi untuk SMILES baru
+7. Menghitung fitur dan melakukan prediksi
+8. Menyimpan hasil demo prediksi
 
 Output:
 - results/tables/feature_importance.csv       : Daftar fitur dan bobot importance
 - results/figures/feature_importance.png      : Grafik feature importance
+- results/tables/test_predictions_best_model.csv : Hasil prediksi pada test set
+- results/figures/confusion_matrix_best_model.png : Confusion matrix visualization
+- results/figures/roc_curve_best_model.png    : ROC curve visualization
 - results/tables/demo_predictions.csv         : Hasil prediksi pada contoh SMILES
 """
 
@@ -24,7 +28,13 @@ import sys
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 import joblib
+
+# Sklearn imports
+from sklearn.metrics import (
+    confusion_matrix, roc_curve, roc_auc_score
+)
 
 # RDKit imports
 try:
@@ -47,9 +57,13 @@ RESULTS_FIGURES_DIR = PROJECT_ROOT / "results" / "figures"
 
 FEATURES_PATH = DATA_PROCESSED_DIR / "pampa_features.csv"
 BEST_MODEL_PATH = MODELS_DIR / "best_model.pkl"
+TEST_SET_PATH = MODELS_DIR / "test_set.pkl"
 
 FEATURE_IMPORTANCE_TABLE_PATH = RESULTS_TABLES_DIR / "feature_importance.csv"
 FEATURE_IMPORTANCE_FIGURE_PATH = RESULTS_FIGURES_DIR / "feature_importance.png"
+TEST_PREDICTIONS_PATH = RESULTS_TABLES_DIR / "test_predictions_best_model.csv"
+CONFUSION_MATRIX_PATH = RESULTS_FIGURES_DIR / "confusion_matrix_best_model.png"
+ROC_CURVE_PATH = RESULTS_FIGURES_DIR / "roc_curve_best_model.png"
 DEMO_PREDICTIONS_PATH = RESULTS_TABLES_DIR / "demo_predictions.csv"
 
 # Kolom fitur yang sama dengan tahap feature engineering
@@ -273,11 +287,85 @@ def predict_new_smiles(smiles_list: list, model, features_df: pd.DataFrame = Non
     return result_df
 
 
+def predict_test_set(model) -> tuple:
+    print("[INFO] Memproses test set...")
+    
+    if not TEST_SET_PATH.exists():
+        print("[WARN] Test set tidak ditemukan. Melewatkan evaluasi test set.")
+        return None, None, None, None, None
+    
+    try:
+        X_test, y_test = joblib.load(TEST_SET_PATH)
+        print(f"[INFO] Test set dimuat: {X_test.shape[0]} sampel")
+        
+        # Prediksi
+        y_pred = model.predict(X_test)
+        y_proba = model.predict_proba(X_test)[:, 1]
+        
+        # Hitung ROC-AUC
+        roc_auc = roc_auc_score(y_test, y_proba)
+        print(f"[INFO] ROC-AUC pada test set: {roc_auc:.4f}")
+        
+        return X_test, y_test, y_pred, y_proba, roc_auc
+    except Exception as e:
+        print(f"[ERROR] Gagal memproses test set: {e}")
+        return None, None, None, None, None
+
+
+def visualize_test_results(y_test, y_pred, y_proba, roc_auc: float, model_name: str = "Best Model") -> None:
+    print("[INFO] Membuat visualisasi hasil test set...")
+    
+    cm = confusion_matrix(y_test, y_pred)
+    
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False,
+                xticklabels=['Low/Moderate (0)', 'High (1)'],
+                yticklabels=['Low/Moderate (0)', 'High (1)'])
+    plt.title(f'Confusion Matrix\nModel: {model_name}', fontsize=12, fontweight='bold')
+    plt.xlabel('Predicted Label')
+    plt.ylabel('True Label')
+    plt.tight_layout()
+    plt.savefig(CONFUSION_MATRIX_PATH, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"[INFO] Confusion matrix disimpan: {CONFUSION_MATRIX_PATH}")
+
+    # ROC Curve
+    fpr, tpr, _ = roc_curve(y_test, y_proba)
+    
+    plt.figure(figsize=(7, 6))
+    plt.plot(fpr, tpr, color='darkorange', lw=2.5, label=f'{model_name} (AUC = {roc_auc:.4f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='Random Classifier')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate', fontsize=11, fontweight='bold')
+    plt.ylabel('True Positive Rate', fontsize=11, fontweight='bold')
+    plt.title('Receiver Operating Characteristic (ROC) Curve - Test Set', fontsize=13, fontweight='bold')
+    plt.legend(loc="lower right", fontsize=10)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(ROC_CURVE_PATH, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"[INFO] ROC curve disimpan: {ROC_CURVE_PATH}")
+
+
+def save_test_predictions(y_test, y_pred, y_proba) -> None:
+    ensure_directories()
+    
+    df_test_preds = pd.DataFrame({
+        'True_Label': y_test,
+        'Predicted_Label': y_pred,
+        'Probability_Class_0': 1.0 - y_proba,
+        'Probability_Class_1': y_proba,
+        'Prediction_Label': ['High Permeability' if p == 1 else 'Low/Moderate Permeability' for p in y_pred]
+    })
+    
+    df_test_preds.to_csv(TEST_PREDICTIONS_PATH, index=False)
+    print(f"[INFO] Test predictions disimpan: {TEST_PREDICTIONS_PATH}")
+
+
 def save_results(importance_df: pd.DataFrame, predictions_df: pd.DataFrame) -> None:
-    """Menyimpan hasil feature importance dan demo predictions ke file CSV."""
     ensure_directories()
 
-    # Simpan feature importance
     importance_df.to_csv(FEATURE_IMPORTANCE_TABLE_PATH, index=False)
     print(f"[INFO] Feature importance disimpan: {FEATURE_IMPORTANCE_TABLE_PATH}")
 
@@ -301,7 +389,16 @@ def main() -> None:
     ensure_directories()
     plot_feature_importance(importance_df)
 
+    # Prediksi dan evaluasi pada test set
+    print("\n[INFO] === Evaluasi pada Test Set ===")
+    X_test, y_test, y_pred, y_proba, roc_auc = predict_test_set(best_model)
+    
+    if X_test is not None:
+        save_test_predictions(y_test, y_pred, y_proba)
+        visualize_test_results(y_test, y_pred, y_proba, roc_auc, "Best Model")
+    
     # Demo prediksi pada beberapa SMILES baru
+    print("\n[INFO] === Demo Prediksi pada SMILES Baru ===")
     # Contoh SMILES dari dataset (ambil 5 random)
     demo_smiles = features_df["SMILES"].sample(n=min(5, len(features_df)), random_state=42).tolist()
 

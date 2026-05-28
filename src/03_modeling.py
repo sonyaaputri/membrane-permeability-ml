@@ -94,7 +94,8 @@ def evaluate_models(models, X_train, X_test, y_train, y_test):
     df_results = pd.DataFrame(results).T
     return df_results, trained_models, predictions_labels, predictions_proba
 
-def save_visualizations(df_results, trained_models, predictions_labels, predictions_proba, y_test, best_model_name):
+def save_comparison_visualization(df_results):
+    """Membuat visualisasi perbandingan performa semua model."""
     sns.set_theme(style="whitegrid")
     
     plt.figure(figsize=(10, 6))
@@ -107,40 +108,8 @@ def save_visualizations(df_results, trained_models, predictions_labels, predicti
     plt.tight_layout()
     plt.savefig('results/figures/model_comparison.png', dpi=300)
     plt.close()
-
-    best_y_pred = predictions_labels[best_model_name]
-    cm = confusion_matrix(y_test, best_y_pred)
     
-    plt.figure(figsize=(6, 5))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False,
-                xticklabels=['Non-Permeable (0)', 'Permeable (1)'],
-                yticklabels=['Non-Permeable (0)', 'Permeable (1)'])
-    plt.title(f'Confusion Matrix\nBest Model: {best_model_name}', fontsize=12, fontweight='bold')
-    plt.xlabel('Predicted Label')
-    plt.ylabel('True Label')
-    plt.tight_layout()
-    plt.savefig('results/figures/confusion_matrix_best_model.png', dpi=300)
-    plt.close()
-
-    best_y_proba = predictions_proba[best_model_name]
-    fpr, tpr, _ = roc_curve(y_test, best_y_proba)
-    roc_auc = df_results.loc[best_model_name, 'ROC-AUC']
-    
-    plt.figure(figsize=(7, 6))
-    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'{best_model_name} (AUC = {roc_auc:.4f})')
-    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('False Positive Rate (1 - Specificity)')
-    plt.ylabel('True Positive Rate (Sensitivity)')
-    plt.title('Receiver Operating Characteristic (ROC) Curve', fontsize=13, fontweight='bold')
-    plt.legend(loc="lower right")
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig('results/figures/roc_curve_best_model.png', dpi=300)
-    plt.close()
-    
-    print(" [INFO] Seluruh visualisasi grafis berhasil disimpan di 'results/figures/'.")
+    print(" [INFO] Visualisasi perbandingan model berhasil disimpan di 'results/figures/model_comparison.png'.")
 
 def main():
     setup_directories()
@@ -173,15 +142,12 @@ def main():
     joblib.dump(best_pipeline, 'models/best_model.pkl')
     print(f" [INFO] Model '{best_model_name}' berhasil disimpan ke 'models/best_model.pkl'.")
     
-    df_test_preds = pd.DataFrame({
-        'True_Label': y_test,
-        'Predicted_Label': predictions_labels[best_model_name],
-        'Probability_Score': predictions_proba[best_model_name]
-    })
-    df_test_preds.to_csv('results/tables/test_predictions_best_model.csv', index=False)
+    joblib.dump((X_test, y_test), 'models/test_set.pkl')
+    print(f" [INFO] Test set berhasil disimpan ke 'models/test_set.pkl'.")
     
-    save_visualizations(df_results, trained_models, predictions_labels, predictions_proba, y_test, best_model_name)
-    print("\n [SUCCESS] Eksekusi pipeline selesai dengan sukses!")
+    save_comparison_visualization(df_results)
+    
+    print("\n [SUCCESS] Training dan evaluasi model selesai dengan sukses!")
 
 if __name__ == '__main__':
     main()
