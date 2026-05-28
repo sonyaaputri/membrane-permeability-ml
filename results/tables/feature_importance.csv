@@ -1,0 +1,10 @@
+Feature,Importance
+MolWt,1.0
+LogP,1.0
+TPSA,1.0
+HBD,1.0
+HBA,1.0
+RotatableBonds,1.0
+HeavyAtomCount,1.0
+RingCount,1.0
+FormalCharge,1.0
