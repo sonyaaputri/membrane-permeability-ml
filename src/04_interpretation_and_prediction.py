@@ -312,7 +312,7 @@ def predict_test_set(model) -> tuple:
         return None, None, None, None, None
 
 
-def visualize_test_results(y_test, y_pred, y_proba, roc_auc: float, model_name: str = "Best Model") -> None:
+def visualize_test_results(y_test, y_pred, y_proba, roc_auc: float, model_name: str = "Logistic Regression") -> None:
     print("[INFO] Membuat visualisasi hasil test set...")
     
     cm = confusion_matrix(y_test, y_pred)
