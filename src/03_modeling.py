@@ -383,11 +383,11 @@ def plot_model_comparison(df_results: pd.DataFrame) -> None:
 
 
 def plot_confusion_matrix(y_test: pd.Series, y_pred: np.ndarray, model_name: str) -> None:
-    """Membuat dan menyimpan confusion matrix best model."""
+    """Membuat dan menyimpan confusion matrix best model"""
     cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    im = ax.imshow(cm, interpolation="nearest")
+    im = ax.imshow(cm, interpolation="nearest", cmap="Blues")
     fig.colorbar(im, ax=ax)
 
     ax.set_title(f"Confusion Matrix\nModel: {model_name}", fontsize=12, fontweight="bold")
