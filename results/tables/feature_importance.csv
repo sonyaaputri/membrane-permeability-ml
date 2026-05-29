@@ -1,10 +1,10 @@
-Feature,Importance
-MolWt,1.0
-LogP,1.0
-TPSA,1.0
-HBD,1.0
-HBA,1.0
-RotatableBonds,1.0
-HeavyAtomCount,1.0
-RingCount,1.0
-FormalCharge,1.0
+Feature,Raw_Importance,Importance,Signed_Effect,Importance_Source,Biological_Description
+LogP,0.2197058336606016,1.0,,model_feature_importances,Lipofilisitas/hidrofobisitas. Nilai LogP yang lebih tinggi menunjukkan molekul lebih mudah berinteraksi dengan bagian hidrofobik lipid bilayer.
+TPSA,0.21664647646031263,0.9860752117988136,,model_feature_importances,Topological Polar Surface Area. Nilai TPSA yang lebih tinggi menunjukkan polaritas lebih besar sehingga molekul cenderung lebih sulit melewati inti hidrofobik membran.
+MolWt,0.18628863984202057,0.8479002889372368,,model_feature_importances,Berat molekul. Molekul yang lebih besar cenderung lebih sulit berdifusi melewati lipid bilayer.
+HeavyAtomCount,0.0979283485746942,0.44572484463918466,,model_feature_importances,Jumlah atom non-hidrogen. Fitur ini berkaitan dengan ukuran dan kompleksitas molekul.
+HBD,0.08222633501641878,0.3742564939966084,,model_feature_importances,Hydrogen bond donor. Jumlah donor ikatan hidrogen yang lebih besar dapat meningkatkan interaksi polar dengan air sehingga permeabilitas pasif dapat menurun.
+RotatableBonds,0.07710270334738124,0.3509360769477263,,model_feature_importances,Jumlah ikatan yang dapat berotasi. Fitur ini menggambarkan fleksibilitas molekul yang dapat memengaruhi bentuk dan kemampuan difusi.
+HBA,0.0725115452764819,0.3300392350459692,,model_feature_importances,Hydrogen bond acceptor. Jumlah akseptor ikatan hidrogen yang lebih besar dapat meningkatkan karakter polar molekul sehingga permeabilitas pasif dapat menurun.
+RingCount,0.047590117822089086,0.2166083486686367,,model_feature_importances,"Jumlah cincin dalam struktur molekul. Fitur ini berkaitan dengan bentuk, rigiditas, dan karakter struktur molekul."
+FormalCharge,0.0,0.0,,model_feature_importances,Muatan formal molekul. Molekul bermuatan umumnya lebih sulit melewati lipid bilayer secara pasif tanpa bantuan protein transport.

@@ -1,6 +1,6 @@
-SMILES,MolWt,LogP,TPSA,HBD,HBA,RotatableBonds,HeavyAtomCount,RingCount,FormalCharge,Prediction,Prediction_Label,Probability_High_Permeability,Probability_Low_Moderate_Permeability
-C[C@]12C[C@H]([C@@H]([C@@]1(CC(=O)[C@@]3([C@H]2CC=C4[C@H]3C=C(C(=O)C4(C)C)O)C)C)[C@](C)(C(=O)/C=C\C(C)(C)O)O)O,514.6590000000003,3.619400000000004,132.13,4,7,4,37,4,0,1,High Permeability,0.5846,0.4154
-C1CCN(CC1)C2CCN(CC2)C3=C(C=C(C=C3)NC(=O)C4=CC=C(C=C4)Br)C(=O)O,486.4100000000001,4.854300000000005,72.88,2,4,5,31,4,0,1,High Permeability,0.785,0.215
-CC1=CN=C(N=C1C2=CC(=CC=C2)N(C)C)N3CCC(CC3)C(=O)N,339.44300000000015,2.2197199999999997,75.35000000000001,1,5,4,25,3,0,1,High Permeability,0.9248,0.0752
-CC1=C(C=CC2=C1OC(CC2)(C)C)O,192.25799999999995,2.8042200000000013,29.46,1,2,0,14,2,0,1,High Permeability,0.951,0.049
-C1=CC(=CC(=C1)OC(F)(F)F)NC(=O)C2=CC(=NN2)C3=CC=CN3,336.27299999999997,3.5557000000000007,82.79999999999998,3,3,4,24,3,0,1,High Permeability,0.6923,0.3077
+Molecule,SMILES,Status,MolWt,LogP,TPSA,HBD,HBA,RotatableBonds,HeavyAtomCount,RingCount,FormalCharge,Prediction,Prediction_Label,Probability_High_Permeability,Probability_Low_Moderate_Permeability
+Aspirin,CC(=O)OC1=CC=CC=C1C(=O)O,Valid,180.15899999999996,1.3101,63.60000000000001,1,3,2,13,1,0,1,High Permeability,0.97,0.03
+Caffeine,Cn1cnc2c1c(=O)n(C)c(=O)n2C,Valid,194.194,-1.0293,61.82,0,3,0,14,2,0,1,High Permeability,0.635,0.365
+Ibuprofen,CC(C)CC1=CC=C(C=C1)C(C)C(=O)O,Valid,206.28499999999997,3.073200000000001,37.3,1,1,4,15,1,0,1,High Permeability,0.795,0.205
+Ethanol,CCO,Valid,46.069,-0.0014000000000000123,20.23,1,1,0,3,0,0,1,High Permeability,0.55,0.45
+Glucose,C(C1C(C(C(C(O1)O)O)O)O)O,Valid,180.156,-3.2213999999999987,110.38000000000001,5,6,1,12,1,0,0,Low/Moderate Permeability,0.2525,0.7475

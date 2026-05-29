@@ -1,0 +1,35 @@
+{
+    "best_model_name": "Random Forest",
+    "selection_basis": [
+        "Macro-F1",
+        "Balanced Accuracy",
+        "ROC-AUC"
+    ],
+    "metrics": {
+        "Accuracy": 0.8476658476658476,
+        "Precision": 0.8743455497382199,
+        "Recall": 0.9597701149425287,
+        "F1-score": 0.915068493150685,
+        "Macro-F1": 0.5884866275277234,
+        "Balanced Accuracy": 0.5731053964543152,
+        "Recall Low/Moderate (0)": 0.1864406779661017,
+        "Recall High (1)": 0.9597701149425287,
+        "ROC-AUC": 0.7082846288720047
+    },
+    "class_labels": {
+        "0": "Low/Moderate Permeability",
+        "1": "High Permeability"
+    },
+    "feature_columns": [
+        "MolWt",
+        "LogP",
+        "TPSA",
+        "HBD",
+        "HBA",
+        "RotatableBonds",
+        "HeavyAtomCount",
+        "RingCount",
+        "FormalCharge"
+    ],
+    "note": "Best model dipilih dengan mempertimbangkan class imbalance. Accuracy tetap dilaporkan, tetapi bukan satu-satunya dasar pemilihan."
+}

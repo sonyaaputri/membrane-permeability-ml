@@ -1,53 +1,61 @@
 """
 04_interpretation_and_prediction.py
 
-Tahap interpretasi model dan prediksi pada molekul baru:
-1. Load model terbaik dari models/best_model.pkl
-2. Load data fitur untuk analisis
-3. Menghitung feature importance
-4. Membuat visualisasi feature importance
-5. Evaluasi model pada test set dengan confusion matrix dan ROC curve
-6. Membuat fungsi prediksi untuk SMILES baru
-7. Menghitung fitur dan melakukan prediksi
-8. Menyimpan hasil demo prediksi
+Tahap interpretasi model terbaik dan demo prediksi SMILES baru.
+
+Fungsi utama:
+1. Load best model hasil 03_modeling.py
+2. Load data fitur hasil 02_feature_engineering.py
+3. Menghitung feature importance secara valid:
+   - coef_ untuk Logistic Regression
+   - feature_importances_ untuk model tree-based seperti Random Forest/XGBoost/Gradient Boosting
+   - permutation importance untuk model yang tidak punya importance bawaan, seperti SVM
+4. Membuat grafik feature importance
+5. Membuat demo prediksi dari SMILES baru
+6. Menyimpan hasil feature importance dan demo prediction
 
 Output:
-- results/tables/feature_importance.csv       : Daftar fitur dan bobot importance
-- results/figures/feature_importance.png      : Grafik feature importance
-- results/tables/test_predictions_best_model.csv : Hasil prediksi pada test set
-- results/figures/confusion_matrix_best_model.png : Confusion matrix visualization
-- results/figures/roc_curve_best_model.png    : ROC curve visualization
-- results/tables/demo_predictions.csv         : Hasil prediksi pada contoh SMILES
+- results/tables/feature_importance.csv
+- results/figures/feature_importance.png
+- results/tables/demo_predictions.csv
+
+Catatan:
+- Evaluasi utama model, confusion matrix, ROC curve, dan test predictions dibuat di 03_modeling.py.
+- File ini fokus pada interpretasi biologis dan prediksi molekul baru.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+import json
 import sys
+from pathlib import Path
+from typing import Any, Optional, Tuple
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import joblib
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 
-# Sklearn imports
-from sklearn.metrics import (
-    confusion_matrix, roc_curve, roc_auc_score
-)
+from sklearn.inspection import permutation_importance
 
-# RDKit imports
+
+# RDKit import
+
 try:
-    from rdkit import Chem
-    from rdkit.Chem import Descriptors, rdMolDescriptors, Crippen
-    from rdkit import RDLogger
+    from rdkit import Chem, RDLogger
+    from rdkit.Chem import Descriptors, Crippen, rdMolDescriptors
+
     RDLogger.DisableLog("rdApp.*")
-except ImportError as e:
-    print(f"[ERROR] RDKit tidak terinstall: {e}")
-    print("Install dengan: pip install rdkit  atau  conda install -c conda-forge rdkit")
+except ImportError as error:
+    print(f"[ERROR] RDKit tidak terinstall: {error}")
+    print("Install RDKit dengan salah satu cara berikut:")
+    print("  pip install rdkit")
+    print("  conda install -c conda-forge rdkit")
     sys.exit(1)
 
-# Path konfigurasi
+
+# Konfigurasi path
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 DATA_PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
@@ -58,15 +66,15 @@ RESULTS_FIGURES_DIR = PROJECT_ROOT / "results" / "figures"
 FEATURES_PATH = DATA_PROCESSED_DIR / "pampa_features.csv"
 BEST_MODEL_PATH = MODELS_DIR / "best_model.pkl"
 TEST_SET_PATH = MODELS_DIR / "test_set.pkl"
+BEST_MODEL_METADATA_PATH = MODELS_DIR / "best_model_metadata.json"
 
 FEATURE_IMPORTANCE_TABLE_PATH = RESULTS_TABLES_DIR / "feature_importance.csv"
 FEATURE_IMPORTANCE_FIGURE_PATH = RESULTS_FIGURES_DIR / "feature_importance.png"
-TEST_PREDICTIONS_PATH = RESULTS_TABLES_DIR / "test_predictions_best_model.csv"
-CONFUSION_MATRIX_PATH = RESULTS_FIGURES_DIR / "confusion_matrix_best_model.png"
-ROC_CURVE_PATH = RESULTS_FIGURES_DIR / "roc_curve_best_model.png"
 DEMO_PREDICTIONS_PATH = RESULTS_TABLES_DIR / "demo_predictions.csv"
 
-# Kolom fitur yang sama dengan tahap feature engineering
+RANDOM_STATE = 42
+TARGET_COLUMN = "Y"
+
 FEATURE_COLUMNS = [
     "MolWt",
     "LogP",
@@ -79,141 +87,283 @@ FEATURE_COLUMNS = [
     "FormalCharge",
 ]
 
-# Deskripsi biologis setiap fitur
-FEATURE_DESCRIPTIONS = {
-    "MolWt": "Berat molekul (g/mol). Molekul lebih berat → lebih sulit menembus membran.",
-    "LogP": "Koefisien partisi (log skala). Nilai tinggi → lebih hidrofobik → lebih mudah menembus lipid bilayer.",
-    "TPSA": "Luas permukaan polar (Ų). Nilai tinggi → lebih polar → lebih sulit menembus membran nonpolar.",
-    "HBD": "Jumlah donor ikatan hidrogen. Nilai tinggi → lebih sulit menembus membran.",
-    "HBA": "Jumlah akseptor ikatan hidrogen. Nilai tinggi → lebih sulit menembus membran.",
-    "RotatableBonds": "Jumlah ikatan rotasi. Berkaitan dengan fleksibilitas molekul.",
-    "HeavyAtomCount": "Jumlah atom non-hidrogen. Berkaitan dengan ukuran molekul.",
-    "RingCount": "Jumlah cincin (aromatik/alifatik). Berkaitan dengan rigiditas struktur.",
-    "FormalCharge": "Muatan formal total. Molekul bermuatan lebih sulit menembus membran.",
+CLASS_LABELS = {
+    0: "Low/Moderate Permeability",
+    1: "High Permeability",
 }
 
+FEATURE_DESCRIPTIONS = {
+    "MolWt": (
+        "Berat molekul. Molekul yang lebih besar cenderung lebih sulit berdifusi "
+        "melewati lipid bilayer."
+    ),
+    "LogP": (
+        "Lipofilisitas/hidrofobisitas. Nilai LogP yang lebih tinggi menunjukkan molekul "
+        "lebih mudah berinteraksi dengan bagian hidrofobik lipid bilayer."
+    ),
+    "TPSA": (
+        "Topological Polar Surface Area. Nilai TPSA yang lebih tinggi menunjukkan polaritas "
+        "lebih besar sehingga molekul cenderung lebih sulit melewati inti hidrofobik membran."
+    ),
+    "HBD": (
+        "Hydrogen bond donor. Jumlah donor ikatan hidrogen yang lebih besar dapat meningkatkan "
+        "interaksi polar dengan air sehingga permeabilitas pasif dapat menurun."
+    ),
+    "HBA": (
+        "Hydrogen bond acceptor. Jumlah akseptor ikatan hidrogen yang lebih besar dapat meningkatkan "
+        "karakter polar molekul sehingga permeabilitas pasif dapat menurun."
+    ),
+    "RotatableBonds": (
+        "Jumlah ikatan yang dapat berotasi. Fitur ini menggambarkan fleksibilitas molekul yang "
+        "dapat memengaruhi bentuk dan kemampuan difusi."
+    ),
+    "HeavyAtomCount": (
+        "Jumlah atom non-hidrogen. Fitur ini berkaitan dengan ukuran dan kompleksitas molekul."
+    ),
+    "RingCount": (
+        "Jumlah cincin dalam struktur molekul. Fitur ini berkaitan dengan bentuk, rigiditas, "
+        "dan karakter struktur molekul."
+    ),
+    "FormalCharge": (
+        "Muatan formal molekul. Molekul bermuatan umumnya lebih sulit melewati lipid bilayer "
+        "secara pasif tanpa bantuan protein transport."
+    ),
+}
+
+
+# Utility
 
 def ensure_directories() -> None:
     """Membuat folder output jika belum tersedia."""
     RESULTS_TABLES_DIR.mkdir(parents=True, exist_ok=True)
     RESULTS_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    print("[INFO] Direktori output berhasil disiapkan.")
 
 
-def load_model_and_data() -> tuple:
-    """Load model terbaik dan data fitur yang sudah diproses."""
-    # Load model
+def load_best_model() -> Any:
+    """Load best model yang sudah disimpan oleh 03_modeling.py."""
     if not BEST_MODEL_PATH.exists():
         raise FileNotFoundError(
-            f"Model terbaik tidak ditemukan di:\n{BEST_MODEL_PATH}\n"
-            "Pastikan sudah menjalankan 03_modeling.py terlebih dahulu."
+            f"Model terbaik tidak ditemukan: {BEST_MODEL_PATH}\n"
+            "Jalankan 03_modeling.py terlebih dahulu."
         )
-    best_model = joblib.load(BEST_MODEL_PATH)
-    print(f"[INFO] Model dimuat: {BEST_MODEL_PATH}")
 
-    # Load data fitur
+    model = joblib.load(BEST_MODEL_PATH)
+    print(f"[INFO] Best model dimuat: {BEST_MODEL_PATH}")
+    return model
+
+
+def load_best_model_metadata() -> dict:
+    """Load metadata best model jika tersedia."""
+    if not BEST_MODEL_METADATA_PATH.exists():
+        print("[WARN] Metadata best model tidak ditemukan. Nama model akan ditulis sebagai 'Best Model'.")
+        return {"best_model_name": "Best Model"}
+
+    with open(BEST_MODEL_METADATA_PATH, "r", encoding="utf-8") as file:
+        metadata = json.load(file)
+
+    print(f"[INFO] Metadata best model dimuat: {BEST_MODEL_METADATA_PATH}")
+    return metadata
+
+
+def load_features_data() -> pd.DataFrame:
+    """Load dataset fitur hasil feature engineering."""
     if not FEATURES_PATH.exists():
         raise FileNotFoundError(
-            f"Dataset fitur tidak ditemukan di:\n{FEATURES_PATH}\n"
-            "Pastikan sudah menjalankan 02_feature_engineering.py terlebih dahulu."
+            f"Dataset fitur tidak ditemukan: {FEATURES_PATH}\n"
+            "Jalankan 02_feature_engineering.py terlebih dahulu."
         )
-    features_df = pd.read_csv(FEATURES_PATH)
-    print(f"[INFO] Data fitur dimuat: {len(features_df)} baris, {len(FEATURE_COLUMNS)} fitur")
 
-    return best_model, features_df
+    df = pd.read_csv(FEATURES_PATH)
+
+    missing_features = [col for col in FEATURE_COLUMNS if col not in df.columns]
+    if missing_features:
+        raise ValueError(f"Kolom fitur berikut tidak ditemukan: {missing_features}")
+
+    print(f"[INFO] Data fitur dimuat: {FEATURES_PATH}")
+    print(f"[INFO] Shape data fitur: {df.shape}")
+    return df
 
 
-def extract_feature_importance(model) -> pd.DataFrame:
+def load_reference_data_for_importance(features_df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[pd.Series]]:
     """
-    Ekstrak feature importance dari model.
-    
-    Metode tergantung tipe model:
-    - Logistic Regression: gunakan absolute coefficient
-    - Random Forest: gunakan feature_importances_
-    - SVM: tidak ada feature importance, gunakan permutation importance
-    - XGBoost: gunakan feature_importance
-    """
-    print("[INFO] Mengekstraksi feature importance dari model...")
+    Mengambil data referensi untuk permutation importance.
 
-    # Jika pipeline, ambil estimator terakhir
+    Prioritas:
+    1. Test set dari models/test_set.pkl hasil 03_modeling.py
+    2. Jika tidak ada, fallback ke seluruh data fitur yang memiliki target Y
+
+    Catatan:
+    Permutation importance lebih baik dihitung pada test set agar interpretasi tidak terlalu bias
+    terhadap data training.
+    """
+    if TEST_SET_PATH.exists():
+        loaded = joblib.load(TEST_SET_PATH)
+
+        # Format baru dari 03 final: (X_test, y_test, test_metadata, feature_columns)
+        if isinstance(loaded, tuple) and len(loaded) >= 2:
+            X_ref = loaded[0]
+            y_ref = loaded[1]
+
+            if not isinstance(X_ref, pd.DataFrame):
+                X_ref = pd.DataFrame(X_ref, columns=FEATURE_COLUMNS)
+            else:
+                X_ref = X_ref[FEATURE_COLUMNS]
+
+            y_ref = pd.Series(y_ref).astype(int)
+            print(f"[INFO] Data referensi importance memakai test set: {X_ref.shape}")
+            return X_ref, y_ref
+
+    if TARGET_COLUMN in features_df.columns:
+        print("[WARN] Test set tidak ditemukan. Permutation importance memakai seluruh data fitur sebagai fallback.")
+        X_ref = features_df[FEATURE_COLUMNS].copy()
+        y_ref = features_df[TARGET_COLUMN].astype(int).copy()
+        return X_ref, y_ref
+
+    print("[WARN] Data target tidak tersedia. Permutation importance tidak dapat dihitung.")
+    return features_df[FEATURE_COLUMNS].copy(), None
+
+
+def get_classifier_from_pipeline(model: Any) -> Any:
+    """
+    Mengambil estimator/classifier utama dari pipeline.
+
+    Pada 03_modeling.py, step classifier dinamai 'clf'.
+    Jika struktur pipeline berubah, estimator terakhir tetap digunakan sebagai fallback.
+    """
     if hasattr(model, "named_steps"):
-        classifier = model.named_steps.get("classifier", model)
-    else:
-        classifier = model
+        if "clf" in model.named_steps:
+            return model.named_steps["clf"]
+        return model.steps[-1][1]
+    return model
 
-    feature_importance_dict = {}
 
-    # Cek tipe model
+def normalize_importance(values: np.ndarray) -> np.ndarray:
+    """Normalisasi importance ke rentang 0-1."""
+    values = np.asarray(values, dtype=float)
+
+    # Jika ada nilai negatif, gunakan nilai absolut karena yang dicari besar pengaruhnya.
+    values = np.abs(values)
+
+    min_value = np.nanmin(values)
+    max_value = np.nanmax(values)
+
+    if np.isclose(max_value, min_value):
+        return np.ones_like(values)
+
+    return (values - min_value) / (max_value - min_value)
+
+
+
+# Feature importance
+
+def extract_feature_importance(
+    model: Any,
+    X_reference: pd.DataFrame,
+    y_reference: Optional[pd.Series],
+) -> pd.DataFrame:
+    """
+    Menghitung feature importance dari best model secara valid.
+
+    Metode:
+    - Logistic Regression: absolute coefficient
+    - Random Forest/XGBoost/Gradient Boosting: feature_importances_
+    - SVM atau model lain tanpa importance bawaan: permutation importance
+    """
+    classifier = get_classifier_from_pipeline(model)
+    classifier_name = type(classifier).__name__
+
+    print(f"[INFO] Mengekstraksi feature importance dari model: {classifier_name}")
+
+    raw_importance = None
+    signed_effect = None
+    importance_source = None
+
     if hasattr(classifier, "coef_"):
-        # Logistic Regression
-        print("[INFO] Tipe model: Logistic Regression")
-        coef = classifier.coef_[0] if classifier.coef_.ndim > 1 else classifier.coef_
-        importance_values = np.abs(coef)
-        
+        coef = np.ravel(classifier.coef_)
+        raw_importance = np.abs(coef)
+        signed_effect = coef
+        importance_source = "absolute_coefficient"
+        print("[INFO] Importance menggunakan absolute coefficient.")
+
     elif hasattr(classifier, "feature_importances_"):
-        # Random Forest, XGBoost, Gradient Boosting
-        if hasattr(classifier, "feature_names_in_"):
-            print(f"[INFO] Tipe model: {type(classifier).__name__}")
-        importance_values = classifier.feature_importances_
-        
-    elif hasattr(classifier, "support_vectors_"):
-        # SVM - gunakan magnitude untuk setiap feature
-        print("[INFO] Tipe model: SVM (menggunakan magnitude)")
-        importance_values = np.ones(len(FEATURE_COLUMNS))  # Sama penting untuk SVM
-        
+        raw_importance = np.asarray(classifier.feature_importances_)
+        signed_effect = np.full(len(FEATURE_COLUMNS), np.nan)
+        importance_source = "model_feature_importances"
+        print("[INFO] Importance menggunakan feature_importances_ bawaan model.")
+
+    elif y_reference is not None:
+        print("[INFO] Model tidak memiliki importance bawaan. Menggunakan permutation importance.")
+        permutation_result = permutation_importance(
+            estimator=model,
+            X=X_reference[FEATURE_COLUMNS],
+            y=y_reference,
+            scoring="f1_macro",
+            n_repeats=20,
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+        )
+        raw_importance = permutation_result.importances_mean
+        signed_effect = np.full(len(FEATURE_COLUMNS), np.nan)
+        importance_source = "permutation_importance_f1_macro"
+
     else:
-        print(f"[WARN] Tidak bisa ekstrak importance dari {type(classifier).__name__}")
-        print("[INFO] Menggunakan uniform importance")
-        importance_values = np.ones(len(FEATURE_COLUMNS))
+        raise ValueError(
+            "Feature importance tidak dapat dihitung karena model tidak memiliki importance bawaan "
+            "dan data target untuk permutation importance tidak tersedia."
+        )
 
-    # Buat DataFrame
-    importance_df = pd.DataFrame({
-        "Feature": FEATURE_COLUMNS,
-        "Importance": importance_values
-    })
+    if len(raw_importance) != len(FEATURE_COLUMNS):
+        raise ValueError(
+            f"Jumlah importance ({len(raw_importance)}) tidak sesuai jumlah fitur ({len(FEATURE_COLUMNS)})."
+        )
 
-    # Normalisasi ke range 0-1
-    min_val = importance_df["Importance"].min()
-    max_val = importance_df["Importance"].max()
-    if max_val > min_val:
-        importance_df["Importance"] = (importance_df["Importance"] - min_val) / (max_val - min_val)
-    else:
-        importance_df["Importance"] = 1.0
+    importance_df = pd.DataFrame(
+        {
+            "Feature": FEATURE_COLUMNS,
+            "Raw_Importance": raw_importance,
+            "Importance": normalize_importance(raw_importance),
+            "Signed_Effect": signed_effect,
+            "Importance_Source": importance_source,
+            "Biological_Description": [FEATURE_DESCRIPTIONS[feature] for feature in FEATURE_COLUMNS],
+        }
+    )
 
-    # Sort descending
     importance_df = importance_df.sort_values("Importance", ascending=False).reset_index(drop=True)
-
-    print("[INFO] Feature importance berhasil diekstraksi")
+    print("[INFO] Feature importance berhasil dihitung.")
     return importance_df
 
 
 def plot_feature_importance(importance_df: pd.DataFrame) -> None:
     """Membuat grafik feature importance."""
-    print("[INFO] Membuat grafik feature importance...")
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    # Reverse untuk tampil dari atas ke bawah
     sorted_df = importance_df.sort_values("Importance", ascending=True)
 
-    colors = plt.cm.viridis(sorted_df["Importance"] / sorted_df["Importance"].max())
-    ax.barh(sorted_df["Feature"], sorted_df["Importance"], color=colors)
-
-    ax.set_xlabel("Importance Score (Normalized)", fontsize=12, fontweight="bold")
-    ax.set_ylabel("Feature", fontsize=12, fontweight="bold")
-    ax.set_title("Feature Importance untuk Prediksi Permeabilitas Membran", fontsize=14, fontweight="bold")
-    ax.grid(axis="x", alpha=0.3, linestyle="--")
-
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.barh(sorted_df["Feature"], sorted_df["Importance"])
+    ax.set_xlabel("Importance Score (Normalized)")
+    ax.set_ylabel("Feature")
+    ax.set_title("Feature Importance untuk Prediksi Permeabilitas Membran", fontweight="bold")
+    ax.grid(axis="x", alpha=0.3)
     plt.tight_layout()
     plt.savefig(FEATURE_IMPORTANCE_FIGURE_PATH, dpi=300, bbox_inches="tight")
-    print(f"[INFO] Grafik disimpan: {FEATURE_IMPORTANCE_FIGURE_PATH}")
     plt.close()
 
+    print(f"[INFO] Grafik feature importance disimpan: {FEATURE_IMPORTANCE_FIGURE_PATH}")
 
-def validate_smiles(smiles: str) -> Chem.Mol | None:
-    """
-    Mencoba membuat objek mol RDKit dari SMILES.
-    Mengembalikan None jika SMILES tidak valid.
-    """
+
+def save_feature_importance(importance_df: pd.DataFrame) -> None:
+    """Menyimpan tabel feature importance."""
+    importance_df.to_csv(FEATURE_IMPORTANCE_TABLE_PATH, index=False)
+    print(f"[INFO] Tabel feature importance disimpan: {FEATURE_IMPORTANCE_TABLE_PATH}")
+
+
+# SMILES prediction
+
+def validate_smiles(smiles: str) -> Optional[Chem.Mol]:
+    """Validasi SMILES dan mengubahnya menjadi objek RDKit Mol."""
+    if smiles is None or str(smiles).strip() == "":
+        return None
+
     try:
         mol = Chem.MolFromSmiles(str(smiles).strip())
         return mol
@@ -222,7 +372,7 @@ def validate_smiles(smiles: str) -> Chem.Mol | None:
 
 
 def compute_descriptors(mol: Chem.Mol) -> dict:
-    """Menghitung 9 deskriptor fisikokimia dari objek mol RDKit."""
+    """Menghitung deskriptor fisikokimia yang sama dengan 02_feature_engineering.py."""
     return {
         "MolWt": Descriptors.MolWt(mol),
         "LogP": Crippen.MolLogP(mol),
@@ -236,189 +386,182 @@ def compute_descriptors(mol: Chem.Mol) -> dict:
     }
 
 
-def predict_new_smiles(smiles_list: list, model, features_df: pd.DataFrame = None) -> pd.DataFrame:
-    """Melakukan prediksi pada list SMILES baru."""
-    print(f"[INFO] Melakukan prediksi pada {len(smiles_list)} molekul baru...")
+def predict_proba_class_1(model: Any, X: pd.DataFrame) -> np.ndarray:
+    """Mengambil probabilitas kelas 1 / High Permeability."""
+    if not hasattr(model, "predict_proba"):
+        raise AttributeError("Model tidak mendukung predict_proba.")
 
-    predictions_list = []
+    proba = model.predict_proba(X)
 
-    for idx, smiles in enumerate(smiles_list):
-        # Validasi SMILES
+    if hasattr(model, "classes_"):
+        classes = model.classes_
+    elif hasattr(model, "named_steps") and hasattr(model.named_steps.get("clf"), "classes_"):
+        classes = model.named_steps["clf"].classes_
+    else:
+        classes = np.array([0, 1])
+
+    class_1_index = list(classes).index(1)
+    return proba[:, class_1_index]
+
+
+def predict_new_smiles(smiles_data: list[dict], model: Any) -> pd.DataFrame:
+    """
+    Melakukan prediksi permeabilitas pada SMILES baru.
+
+    Parameter smiles_data berisi list dict:
+    [
+        {"Molecule": "Aspirin", "SMILES": "..."},
+        ...
+    ]
+    """
+    prediction_rows = []
+
+    print(f"[INFO] Melakukan prediksi pada {len(smiles_data)} SMILES baru...")
+
+    for item in smiles_data:
+        molecule_name = item.get("Molecule", "Unknown Molecule")
+        smiles = item.get("SMILES", "")
+
         mol = validate_smiles(smiles)
         if mol is None:
-            print(f"[WARN] SMILES invalid (index {idx}): {smiles}")
+            prediction_rows.append(
+                {
+                    "Molecule": molecule_name,
+                    "SMILES": smiles,
+                    "Status": "Invalid SMILES",
+                    "Prediction": np.nan,
+                    "Prediction_Label": "Invalid SMILES",
+                    "Probability_High_Permeability": np.nan,
+                    "Probability_Low_Moderate_Permeability": np.nan,
+                }
+            )
+            print(f"[WARN] SMILES invalid: {molecule_name} | {smiles}")
             continue
 
-        # Hitung deskriptor
-        try:
-            descriptors = compute_descriptors(mol)
-        except Exception as e:
-            print(f"[WARN] Gagal menghitung deskriptor (index {idx}): {e}")
-            continue
+        descriptors = compute_descriptors(mol)
+        X_new = pd.DataFrame([descriptors], columns=FEATURE_COLUMNS)
 
-        # Buat feature vector
-        feature_vector = np.array([descriptors[col] for col in FEATURE_COLUMNS]).reshape(1, -1)
+        pred_class = int(model.predict(X_new)[0])
+        prob_high = float(predict_proba_class_1(model, X_new)[0])
+        prob_low = 1.0 - prob_high
 
-        # Prediksi
-        try:
-            # Jika pipeline, akan auto-scale
-            pred_class = model.predict(feature_vector)[0]
-            pred_proba = model.predict_proba(feature_vector)[0]
+        prediction_row = {
+            "Molecule": molecule_name,
+            "SMILES": smiles,
+            "Status": "Valid",
+            **descriptors,
+            "Prediction": pred_class,
+            "Prediction_Label": CLASS_LABELS[pred_class],
+            "Probability_High_Permeability": round(prob_high, 4),
+            "Probability_Low_Moderate_Permeability": round(prob_low, 4),
+        }
+        prediction_rows.append(prediction_row)
 
-            # Ambil probability untuk kelas high permeability (kelas 1)
-            prob_high_perm = pred_proba[1] if len(pred_proba) > 1 else pred_proba[0]
-
-            # Buat row hasil
-            row = {"SMILES": smiles}
-            row.update(descriptors)
-            row["Prediction"] = int(pred_class)
-            row["Prediction_Label"] = "High Permeability" if pred_class == 1 else "Low/Moderate Permeability"
-            row["Probability_High_Permeability"] = round(prob_high_perm, 4)
-            row["Probability_Low_Moderate_Permeability"] = round(1.0 - prob_high_perm, 4)
-
-            predictions_list.append(row)
-
-        except Exception as e:
-            print(f"[WARN] Gagal prediksi (index {idx}): {e}")
-            continue
-
-    result_df = pd.DataFrame(predictions_list)
-    print(f"[INFO] Prediksi selesai. Total berhasil: {len(result_df)}/{len(smiles_list)}")
-    return result_df
+    predictions_df = pd.DataFrame(prediction_rows)
+    print("[INFO] Prediksi SMILES baru selesai.")
+    return predictions_df
 
 
-def predict_test_set(model) -> tuple:
-    print("[INFO] Memproses test set...")
-    
-    if not TEST_SET_PATH.exists():
-        print("[WARN] Test set tidak ditemukan. Melewatkan evaluasi test set.")
-        return None, None, None, None, None
-    
-    try:
-        X_test, y_test = joblib.load(TEST_SET_PATH)
-        print(f"[INFO] Test set dimuat: {X_test.shape[0]} sampel")
-        
-        # Prediksi
-        y_pred = model.predict(X_test)
-        y_proba = model.predict_proba(X_test)[:, 1]
-        
-        # Hitung ROC-AUC
-        roc_auc = roc_auc_score(y_test, y_proba)
-        print(f"[INFO] ROC-AUC pada test set: {roc_auc:.4f}")
-        
-        return X_test, y_test, y_pred, y_proba, roc_auc
-    except Exception as e:
-        print(f"[ERROR] Gagal memproses test set: {e}")
-        return None, None, None, None, None
+def save_demo_predictions(predictions_df: pd.DataFrame) -> None:
+    """Menyimpan hasil demo prediksi."""
+    predictions_df.to_csv(DEMO_PREDICTIONS_PATH, index=False)
+    print(f"[INFO] Demo predictions disimpan: {DEMO_PREDICTIONS_PATH}")
 
 
-def visualize_test_results(y_test, y_pred, y_proba, roc_auc: float, model_name: str = "Logistic Regression") -> None:
-    print("[INFO] Membuat visualisasi hasil test set...")
-    
-    cm = confusion_matrix(y_test, y_pred)
-    
-    plt.figure(figsize=(6, 5))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False,
-                xticklabels=['Low/Moderate (0)', 'High (1)'],
-                yticklabels=['Low/Moderate (0)', 'High (1)'])
-    plt.title(f'Confusion Matrix\nModel: {model_name}', fontsize=12, fontweight='bold')
-    plt.xlabel('Predicted Label')
-    plt.ylabel('True Label')
-    plt.tight_layout()
-    plt.savefig(CONFUSION_MATRIX_PATH, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"[INFO] Confusion matrix disimpan: {CONFUSION_MATRIX_PATH}")
+def print_biological_interpretation(importance_df: pd.DataFrame, top_n: int = 3) -> None:
+    """Menampilkan ringkasan interpretasi biologis fitur terpenting."""
+    print("\n[INFO] Interpretasi biologis fitur terpenting:")
 
-    # ROC Curve
-    fpr, tpr, _ = roc_curve(y_test, y_proba)
-    
-    plt.figure(figsize=(7, 6))
-    plt.plot(fpr, tpr, color='darkorange', lw=2.5, label=f'{model_name} (AUC = {roc_auc:.4f})')
-    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='Random Classifier')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('False Positive Rate', fontsize=11, fontweight='bold')
-    plt.ylabel('True Positive Rate', fontsize=11, fontweight='bold')
-    plt.title('Receiver Operating Characteristic (ROC) Curve - Test Set', fontsize=13, fontweight='bold')
-    plt.legend(loc="lower right", fontsize=10)
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(ROC_CURVE_PATH, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"[INFO] ROC curve disimpan: {ROC_CURVE_PATH}")
-
-
-def save_test_predictions(y_test, y_pred, y_proba) -> None:
-    ensure_directories()
-    
-    df_test_preds = pd.DataFrame({
-        'True_Label': y_test,
-        'Predicted_Label': y_pred,
-        'Probability_Class_0': 1.0 - y_proba,
-        'Probability_Class_1': y_proba,
-        'Prediction_Label': ['High Permeability' if p == 1 else 'Low/Moderate Permeability' for p in y_pred]
-    })
-    
-    df_test_preds.to_csv(TEST_PREDICTIONS_PATH, index=False)
-    print(f"[INFO] Test predictions disimpan: {TEST_PREDICTIONS_PATH}")
-
-
-def save_results(importance_df: pd.DataFrame, predictions_df: pd.DataFrame) -> None:
-    ensure_directories()
-
-    importance_df.to_csv(FEATURE_IMPORTANCE_TABLE_PATH, index=False)
-    print(f"[INFO] Feature importance disimpan: {FEATURE_IMPORTANCE_TABLE_PATH}")
-
-    # Simpan demo predictions
-    if not predictions_df.empty:
-        predictions_df.to_csv(DEMO_PREDICTIONS_PATH, index=False)
-        print(f"[INFO] Demo predictions disimpan: {DEMO_PREDICTIONS_PATH}")
-
-
-def main() -> None:
-    """Fungsi utama untuk interpretasi dan prediksi."""
-    # Load model dan data
-    best_model, features_df = load_model_and_data()
-
-    # Ekstrak feature importance
-    importance_df = extract_feature_importance(best_model)
-    print("[INFO] Top 5 Fitur Terpenting:")
-    print(importance_df.to_string(index=False))
-
-    # Plot feature importance
-    ensure_directories()
-    plot_feature_importance(importance_df)
-
-    # Prediksi dan evaluasi pada test set
-    print("\n[INFO] === Evaluasi pada Test Set ===")
-    X_test, y_test, y_pred, y_proba, roc_auc = predict_test_set(best_model)
-    
-    if X_test is not None:
-        save_test_predictions(y_test, y_pred, y_proba)
-        visualize_test_results(y_test, y_pred, y_proba, roc_auc, "Best Model")
-    
-    # Demo prediksi pada beberapa SMILES baru
-    print("\n[INFO] === Demo Prediksi pada SMILES Baru ===")
-    # Contoh SMILES dari dataset (ambil 5 random)
-    demo_smiles = features_df["SMILES"].sample(n=min(5, len(features_df)), random_state=42).tolist()
-
-    print("[INFO] Demo Prediksi pada 5 Molekul Random")
-
-    demo_predictions = predict_new_smiles(demo_smiles, best_model, features_df)
-    print("[INFO] Hasil Demo Prediksi:")
-    print(demo_predictions[["SMILES", "Prediction_Label", "Probability_High_Permeability"]].to_string(index=False))
-
-    # Simpan hasil
-    save_results(importance_df, demo_predictions)
-
-    print("\n[INFO] Interpretasi Biologis Fitur Terpenting:")
-    print("[INFO] Top 3 Fitur Terpenting dan Maknanya:")
-    for idx, row in importance_df.head(3).iterrows():
+    for rank, row in importance_df.head(top_n).iterrows():
         feature = row["Feature"]
         importance = row["Importance"]
-        description = FEATURE_DESCRIPTIONS.get(feature, "Tidak ada deskripsi")
-        print(f"  {idx + 1}. {feature} (Importance: {importance:.4f})")
-        print(f"     → {description}")
+        description = row["Biological_Description"]
+
+        print(f"{rank + 1}. {feature} (normalized importance = {importance:.4f})")
+        print(f"   {description}")
+
+        if not pd.isna(row.get("Signed_Effect", np.nan)):
+            signed_effect = row["Signed_Effect"]
+            direction = "meningkatkan" if signed_effect > 0 else "menurunkan"
+            print(
+                f"   Pada model linear, koefisien fitur ini bernilai {signed_effect:.4f}, "
+                f"sehingga kenaikan fitur cenderung {direction} peluang prediksi kelas High Permeability."
+            )
+
+
+
+# Main
+
+def main() -> None:
+    ensure_directories()
+
+    model = load_best_model()
+    metadata = load_best_model_metadata()
+    features_df = load_features_data()
+
+    best_model_name = metadata.get("best_model_name", "Best Model")
+    print(f"[INFO] Nama best model: {best_model_name}")
+
+    X_reference, y_reference = load_reference_data_for_importance(features_df)
+
+    importance_df = extract_feature_importance(
+        model=model,
+        X_reference=X_reference,
+        y_reference=y_reference,
+    )
+
+    print("\n=== TOP FEATURE IMPORTANCE ===")
+    print(
+        importance_df[
+            ["Feature", "Raw_Importance", "Importance", "Importance_Source"]
+        ].head(10).round(6).to_string(index=False)
+    )
+    print("==============================\n")
+
+    save_feature_importance(importance_df)
+    plot_feature_importance(importance_df)
+    print_biological_interpretation(importance_df, top_n=3)
+
+    # Contoh SMILES baru untuk demo. Ini bukan random dari dataset.
+    demo_smiles = [
+        {
+            "Molecule": "Aspirin",
+            "SMILES": "CC(=O)OC1=CC=CC=C1C(=O)O",
+        },
+        {
+            "Molecule": "Caffeine",
+            "SMILES": "Cn1cnc2c1c(=O)n(C)c(=O)n2C",
+        },
+        {
+            "Molecule": "Ibuprofen",
+            "SMILES": "CC(C)CC1=CC=C(C=C1)C(C)C(=O)O",
+        },
+        {
+            "Molecule": "Ethanol",
+            "SMILES": "CCO",
+        },
+        {
+            "Molecule": "Glucose",
+            "SMILES": "C(C1C(C(C(C(O1)O)O)O)O)O",
+        },
+    ]
+
+    print("\n[INFO] === Demo Prediksi SMILES Baru ===")
+    demo_predictions_df = predict_new_smiles(demo_smiles, model)
+
+    columns_to_show = [
+        "Molecule",
+        "SMILES",
+        "Prediction_Label",
+        "Probability_High_Permeability",
+        "Probability_Low_Moderate_Permeability",
+    ]
+    print(demo_predictions_df[columns_to_show].to_string(index=False))
+
+    save_demo_predictions(demo_predictions_df)
+
+    print("\n[SUCCESS] Interpretasi model dan demo prediksi selesai.")
+    print("[INFO] Evaluasi performa utama, confusion matrix, dan ROC curve berada di output 03_modeling.py.")
 
 
 if __name__ == "__main__":
